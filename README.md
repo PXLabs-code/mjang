@@ -8,6 +8,7 @@
 - **阶段 2 已完成（CPU 路径）**：用户指定的 v3 模型已校验；官方 Mortal CPU 容器构建、mjai 对局和 Docker NVIDIA 直通验证均已完成。官方推理入口固定使用 CPU。
 - **阶段 3 基线已实现**：只依据向听数和有效进张选牌，支持打成 mjai bot zip。
 - **阶段 4.1 已完成**：加入赤五牌表示、一般形/七对子/国士无双向听数和有效进张核心；纯效率 bot 已改用该核心。
+- **阶段 4.2 已完成**：加入效率弃牌排序和自动立直；使用 mjai 官方状态机判断立直是否合法。
 
 基线和摸切 bot 都是实验工具，不是实战提示助手。
 
@@ -183,7 +184,29 @@ CPU 推理会占用 bot 容器的 CPU，并可能降低批量模拟吞吐；`mja
 .\.venv\Scripts\python.exe -m unittest tests.test_core tests.test_efficiency_bot -v
 ```
 
-预期 11 项通过。核心 bot 与改造前的效率基线做了 4 场同种子座位轮换：核心平均顺位 **2.50**，基线平均顺位 **2.50**；配对平均顺位差 **0.00**，95% t 置信区间 **[-2.74, 2.74]**。样本极小，不能据此判断强弱；后续模块仍需按此方式报告样本量和置信区间。
+预期 11 项通过。核心 bot 与改造前的效率基线做了 4 场同种子座位轮换：核心平均顺位 **2.50**，基线平均顺位 **2.50**；配对平均顺位差 **0.00**，按轮换计算的 95% t 区间 **[-2.74, 2.74]**。四场只有一个独立种子组，因此该区间仅作描述，不能估计种子间差异或据此判断强弱。
+
+### 牌效率选牌与立直（阶段 4.2）
+
+`src\mahjong_advisor\efficiency_strategy.py` 按「弃牌后向听数最低、再按有效进张最多」排序。mjai 适配器使用官方 `can_riichi` 状态，仅在规则允许时自动立直，并先保存最优听牌弃牌，再响应 `reach`；可和牌时接受自摸/荣和。该阶段不做吃碰杠，也未加入打点、役种或局况判断。
+
+打包并运行四座同种子轮换：
+
+```powershell
+.\.venv\Scripts\python.exe tools\package_bot.py --entrypoint bot_efficiency.py --output build\efficiency-bot.zip
+.\.venv\Scripts\python.exe tools\package_bot.py --entrypoint bot_strategy.py --output build\efficiency-riichi.zip
+.\.venv\Scripts\python.exe tools\run_experiment.py `
+  --submission build\efficiency-riichi.zip --bot-name riichi `
+  --submission build\efficiency-bot.zip --bot-name baseline `
+  --submission build\efficiency-bot.zip --bot-name baseline `
+  --submission build\efficiency-bot.zip --bot-name baseline `
+  --logs-dir logs\strategy-riichi-vs-baseline\sample-002 --rotate --seed 8100 --port-base 29100
+.\.venv\Scripts\python.exe tools\summarize_results.py `
+  logs\strategy-riichi-vs-baseline\sample-002 `
+  --csv logs\strategy-riichi-vs-baseline\sample-002\results.csv
+```
+
+该样本 4 场均有效，29 次立直均被接受；立直 bot 平均顺位 **1.00**，基线 **3.00**，四场配对差均为 **-2.00**。按轮换计算的 95% t 区间退化为 `[1.00, 1.00]`（配对差 `[-2.00, -2.00]`），但这四场使用同一牌山种子，独立种子组只有 1 个，种子层级的置信区间不可估。结果仅为协议与策略冒烟样本，不代表强度结论。
 
 ## 项目结构
 
@@ -193,6 +216,8 @@ bot_efficiency.py                  纯牌效率基线入口
 src\mahjong_advisor\bot.py         mjai 摸切协议 bot
 src\mahjong_advisor\efficiency_bot.py  牌效率基线策略
 src\mahjong_advisor\core.py        牌表示、向听数和有效进张
+src\mahjong_advisor\efficiency_strategy.py  效率弃牌和立直判断
+bot_strategy.py                    mjai 效率/立直适配器入口
 tools\package_bot.py               将 bot 和包代码打成提交 zip
 tools\run_first_game.py            调用 mjai.Simulator 跑一局
 tools\run_experiment.py             运行四家 bot 并可轮换座位
@@ -216,7 +241,7 @@ logs\                              模拟器日志（运行时生成）
 2. **评估基础（已完成）**：保存每局结果，输出平均顺位、一位率、四位率和 CSV。
 3. **纯牌效率基线（已完成）**：仅按向听数和有效进张选牌，支持座位轮换。
 4. **Mortal 对照（CPU 基础链路已跑通）**：完成 50 局并发 1 吞吐测量和并发 2/4 小样本；后续再增加轮换强度评估及出牌一致率。
-5. **规则助手**：核心牌型分析已完成；下一步实现效率选牌和立直判断，再实现防守、役种/打点、局况权重配置。
+5. **规则助手**：核心牌型分析、效率弃牌和立直判断已完成；下一步实现防守，再实现役种/打点和局况权重配置。
 6. **自动调参**：参数配置化，先小样本筛选，再对候选方案进行大样本验证并报告置信区间。
 7. **提示窗**：置顶 Tkinter 小窗，仅显示一个当前推荐。
 8. **好友房数据接入**：最后实现，并仅用于所有参与者知情同意的好友房。
@@ -228,4 +253,4 @@ logs\                              模拟器日志（运行时生成）
 - 当前摸切和纯牌效率 bot 仅用于模拟与基线对比，不是完整出牌提示助手。
 - `mjai` 模拟器调用 Docker，首次启动需要拉取镜像和可用的网络连接。
 - 吞吐测试中的 50 局固定座位，不能用于评价策略强度；目前对 Mortal 的座位轮换仍是小样本。
-- 尚未实现完整策略引擎、自动调参或客户端通信解析。
+- 尚未实现防守、役种/打点、局况权重、自动调参或客户端通信解析。

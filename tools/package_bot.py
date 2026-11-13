@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def package_bot(output: Path, entrypoint: str = "bot.py") -> Path:
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    if entrypoint not in {"bot.py", "bot_efficiency.py"}:
+    if entrypoint not in {"bot.py", "bot_efficiency.py", "bot_strategy.py"}:
         raise ValueError(f"unsupported bot entrypoint: {entrypoint}")
 
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -33,7 +33,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--entrypoint",
-        choices=("bot.py", "bot_efficiency.py"),
+        choices=("bot.py", "bot_efficiency.py", "bot_strategy.py"),
         default="bot.py",
         help="bot implementation to package",
     )

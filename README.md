@@ -80,7 +80,16 @@ py -3.12 -m venv .venv
   logs\efficiency-vs-tsumogiri --csv logs\efficiency-vs-tsumogiri\results.csv
 ```
 
-`--rotate` 会跑四场，每场在 `experiment.json` 记录座位与 bot 映射。当前固定种子的冒烟结果：4 场中基线平均顺位 1.0、一位率 100%；摸切组 12 个座位样本平均顺位 3.0、一位率 0%、四位率 33.3%。**样本很小且对手是摸切 bot，不代表真实强度或统计显著性。**
+`--rotate` 会跑四场，每场在 `experiment.json` 记录座位、bot 映射和种子。四场轮换使用同一个 mjai 种子元组；默认是 `(10000, 2000)`，也可用 `--seed` 改第二个分量。这样只改变 bot 所在座位，不会为每个座位轮换另选种子。
+
+基线的固定策略如下：
+
+- 只在自己的摸牌后出牌；不立直，也不吃、碰或杠。其他时机一律回复 `none`。
+- 对每种不同牌计算弃牌后的向听数，先选向听数最低的牌；并列时选能带来最多「严格降低向听数」有效进张的牌。
+- 有效进张剩余数按 `4 - 已公开可见数 - 弃牌后自己持有数` 计算；仍并列时按牌索引排序。
+- 不评估役种、打点、防守、赤牌价值或局况。相同牌种的赤五与普通五不作价值区分。
+
+当前固定种子的冒烟结果：4 场中基线平均顺位 1.0、一位率 100%；摸切组 12 个座位样本平均顺位 3.0、一位率 0%、四位率 33.3%。**样本很小且对手是摸切 bot，不代表真实强度或统计显著性。**
 
 ## Mortal 模型与 GPU 状态
 
@@ -137,6 +146,22 @@ CPU 推理会占用 bot 容器的 CPU，并可能降低批量模拟吞吐；`mja
 .\.venv\Scripts\python.exe tools\report_mortal_latency.py logs\efficiency-vs-mortal
 ```
 
+### 吞吐量基准
+
+`tools\benchmark_throughput.py` 可运行「1 个效率基线 + 3 个 Mortal」，并分别测试不同并发数。每局使用递增的可复现种子、独立端口和日志目录；输出 `games.csv`（逐局耗时、Mortal 推理次数、有效性及顺位）与 `benchmark.json`（吞吐量、Docker CPU 和峰值内存）。例如：
+
+```powershell
+.\.venv\Scripts\python.exe tools\benchmark_throughput.py `
+  --efficiency-submission build\efficiency-bot.zip `
+  --mortal-submission build\mortal-bot.zip `
+  --logs-dir logs\throughput\concurrency-1 `
+  --games 50 --concurrency 1 --seed 3000 --port-base 28100
+```
+
+用新的 `--logs-dir` 分别重跑 `--concurrency 2`、`4` 或 `8`；端口范围不能与其他正在运行的模拟重叠。失败局会保留在 CSV 中并标记为无效，不计入有效局吞吐量。Docker CPU 是本次新建 bot 容器的聚合用量，不包含基准开始前已运行的容器。
+
+**东风战限制：**当前安装的 `mjai.Simulator` 没有东风/东南模式参数，运行日志明确记录为 `hanchang game`。因此上述命令跑的是东南战（hanchan），不能当作东风战基准；如需东风战，必须先更换或扩展模拟器。
+
 ## 项目结构
 
 ```text
@@ -148,6 +173,7 @@ tools\package_bot.py               将 bot 和包代码打成提交 zip
 tools\run_first_game.py            调用 mjai.Simulator 跑一局
 tools\run_experiment.py             运行四家 bot 并可轮换座位
 tools\summarize_results.py          解析顺位并写 CSV
+tools\benchmark_throughput.py       并发吞吐量、Docker CPU/内存及逐局推理计数
 tools\download_mortal_model.py      按用户指定来源下载并校验模型
 tools\package_mortal_bot.py         打包 Mortal 模型与 mjai 适配器
 tools\report_mortal_latency.py      汇总 Mortal 推理耗时

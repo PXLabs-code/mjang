@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
-def collect_latencies(logs_dir: Path) -> list[float]:
+def _read_latencies(
+    logs_dir: Path, allow_missing_logs: bool = False
+) -> list[float]:
     metadata_files = sorted(logs_dir.rglob("experiment.json"))
     if not metadata_files:
         raise ValueError(f"no experiment.json files found under {logs_dir}")
@@ -23,15 +25,30 @@ def collect_latencies(logs_dir: Path) -> list[float]:
             if bot_name != "mortal":
                 continue
             log_path = metadata_path.parent / f"player_logs.{seat}.stdout.txt"
+            if not log_path.exists() and allow_missing_logs:
+                continue
             for line in log_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
                 event = json.loads(line)
                 meta = event.get("meta") if isinstance(event, dict) else None
                 eval_time_ns = meta.get("eval_time_ns") if isinstance(meta, dict) else None
                 if isinstance(eval_time_ns, (int, float)):
                     latencies_ms.append(eval_time_ns / 1_000_000)
+    return latencies_ms
+
+
+def collect_latencies(logs_dir: Path) -> list[float]:
+    latencies_ms = _read_latencies(logs_dir)
     if not latencies_ms:
         raise ValueError(f"no Mortal eval_time_ns values found under {logs_dir}")
     return latencies_ms
+
+
+def count_mortal_inferences(
+    logs_dir: Path, allow_missing_logs: bool = False
+) -> int:
+    return len(_read_latencies(logs_dir, allow_missing_logs=allow_missing_logs))
 
 
 def main() -> None:

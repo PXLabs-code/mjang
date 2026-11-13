@@ -37,6 +37,18 @@ def main() -> None:
     parser.add_argument("--rotate", action="store_true", help="run all four seat rotations")
     parser.add_argument("--timeout", type=float, default=2.0)
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=2000,
+        help="second component of the mjai seed (the default preserves the existing seed)",
+    )
+    parser.add_argument(
+        "--port-base",
+        type=int,
+        default=28090,
+        help="first host port used by this simulator",
+    )
+    parser.add_argument(
         "--docker-image",
         help="optional custom mjai-client-compatible image for all submissions",
     )
@@ -46,11 +58,16 @@ def main() -> None:
         parser.error("--submission and --bot-name must each be provided four times")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
+    if args.seed < 0:
+        parser.error("--seed must be non-negative")
+    if not 1 <= args.port_base <= 65532:
+        parser.error("--port-base must allow four consecutive TCP ports")
     if args.docker_image:
         mjai_game.MjaiPlayerClient = partial(
             MjaiPlayerClient, docker_image_name=args.docker_image
         )
 
+    seed = (10000, args.seed)
     for seat in range(4 if args.rotate else 1):
         rotation_dir = args.logs_dir / f"rotation_{seat}" if args.rotate else args.logs_dir
         submissions = args.submission[seat:] + args.submission[:seat]
@@ -60,6 +77,8 @@ def main() -> None:
             "seat_bots": seat_bots,
             "submissions": [str(path.resolve()) for path in submissions],
             "docker_image": args.docker_image or "docker.io/smly/mjai-client:v3",
+            "seed": list(seed),
+            "port_base": args.port_base,
         }
         (rotation_dir / "experiment.json").write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"
@@ -69,6 +88,8 @@ def main() -> None:
             [str(path.resolve()) for path in submissions],
             logs_dir=str(rotation_dir),
             timeout=args.timeout,
+            port=args.port_base,
+            seed=seed,
         ).run()
 
 

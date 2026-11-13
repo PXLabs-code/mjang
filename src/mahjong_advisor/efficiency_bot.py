@@ -1,40 +1,9 @@
 """只按向听数和有效进张选择弃牌的 mjai 基线 bot。"""
 
 import json
-import re
-from collections import Counter
 from typing import Any
 
-from mahjong.shanten import Shanten
-
-
-_SUIT_INDEX = {"m": 0, "p": 1, "s": 2}
-_HONOR_INDEX = {"E": 27, "S": 28, "W": 29, "N": 30, "P": 31, "F": 32, "C": 33}
-_TILE_PATTERN = re.compile(r"([0-9])([mps])r?")
-
-
-def tile_index(tile: str) -> int:
-    """Return a 0-33 tile index; red fives share their normal tile index."""
-    if tile in _HONOR_INDEX:
-        return _HONOR_INDEX[tile]
-    match = _TILE_PATTERN.fullmatch(tile)
-    if match is None:
-        raise ValueError(f"unsupported mjai tile: {tile!r}")
-
-    rank = int(match.group(1))
-    suit = match.group(2)
-    if rank == 0:
-        rank = 5
-    if rank < 1 or rank > 9:
-        raise ValueError(f"invalid suited tile: {tile!r}")
-    return _SUIT_INDEX[suit] * 9 + rank - 1
-
-
-def hand_counts(tiles: list[str]) -> list[int]:
-    counts = [0] * 34
-    for tile in tiles:
-        counts[tile_index(tile)] += 1
-    return counts
+from .core import HandAnalyzer, hand_counts, tile_index
 
 
 class EfficiencyBot:
@@ -44,7 +13,7 @@ class EfficiencyBot:
         self.player_id = player_id
         self.hand: list[str] = []
         self.visible_counts = [0] * 34
-        self.shanten = Shanten()
+        self.analyzer = HandAnalyzer()
 
     def react(self, raw_events: str) -> dict[str, Any]:
         events = json.loads(raw_events)
@@ -101,12 +70,12 @@ class EfficiencyBot:
                     except ValueError as error:
                         raise ValueError(f"discarded tile {tile!r} is not in own hand") from error
         elif event_type in {"chi", "pon", "daiminkan", "ankan", "kakan"}:
-            for key in ("pai",):
-                tile = event.get(key)
+            if event_type == "kakan":
+                tile = event.get("pai")
                 if isinstance(tile, str) and tile != "?":
                     self._mark_visible(tile)
             consumed = event.get("consumed", [])
-            if isinstance(consumed, list):
+            if isinstance(consumed, list) and event_type != "kakan":
                 for tile in consumed:
                     if isinstance(tile, str) and tile != "?":
                         self._mark_visible(tile)
@@ -116,13 +85,6 @@ class EfficiencyBot:
 
     def _choose_discard(self) -> str:
         own_counts = hand_counts(self.hand)
-        cache: dict[tuple[int, ...], int] = {}
-
-        def shanten_for(counts: list[int]) -> int:
-            key = tuple(counts)
-            if key not in cache:
-                cache[key] = self.shanten.calculate_shanten(counts)
-            return cache[key]
 
         best_score: tuple[int, int, int, str] | None = None
         best_tile: str | None = None
@@ -136,16 +98,13 @@ class EfficiencyBot:
 
             after_discard = own_counts.copy()
             after_discard[index] -= 1
-            current_shanten = shanten_for(after_discard)
-            effective_draws = 0
-            for draw_index in range(34):
-                remaining = 4 - self.visible_counts[draw_index] - after_discard[draw_index]
-                if remaining <= 0:
-                    continue
-                after_draw = after_discard.copy()
-                after_draw[draw_index] += 1
-                if shanten_for(after_draw) < current_shanten:
-                    effective_draws += remaining
+            current_shanten = self.analyzer.calculate_shanten(after_discard)
+            effective_draws = sum(
+                remaining
+                for _, remaining in self.analyzer.effective_draws(
+                    after_discard, self.visible_counts
+                )
+            )
 
             score = (current_shanten, -effective_draws, index, tile)
             if best_score is None or score < best_score:

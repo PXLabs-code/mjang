@@ -43,6 +43,26 @@ class EfficiencyBotTests(unittest.TestCase):
         self.assertEqual(bot.visible_counts[tile_index("E")], 1)
         self.assertEqual(len(bot.hand), 13)
 
+    def test_tracks_call_tiles_once_across_pon_and_kakan(self) -> None:
+        bot = EfficiencyBot(0)
+        events = (
+            '[{"type":"start_kyoku","dora_marker":"1p",'
+            '"tehais":[["1m","2m","3m","4m","5m","6m","7p","8p","9p",'
+            '"2s","3s","4s","E"],["?","?","?","?","?","?","?","?","?","?","?","?","?"],'
+            '["?","?","?","?","?","?","?","?","?","?","?","?","?"],'
+            '["?","?","?","?","?","?","?","?","?","?","?","?","?"]]},'
+            '{"type":"dahai","actor":1,"pai":"C"},'
+            '{"type":"pon","actor":2,"pai":"C","consumed":["C","C"]}]'
+        )
+        bot.react(events)
+
+        self.assertEqual(bot.visible_counts[tile_index("C")], 3)
+
+        bot.react(
+            '[{"type":"kakan","actor":2,"pai":"C","consumed":["C","C","C"]}]'
+        )
+        self.assertEqual(bot.visible_counts[tile_index("C")], 4)
+
     def test_hand_counts_include_red_tiles(self) -> None:
         self.assertEqual(hand_counts(["5mr", "5m"])[tile_index("5m")], 2)
 

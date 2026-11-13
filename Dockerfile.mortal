@@ -1,0 +1,24 @@
+FROM smly/mjai-client:v3@sha256:1827d405601d206290f8b6489bd03d1aa1e3343e0c77f6e2edcdd0715c1b7229
+
+USER root
+ARG MORTAL_COMMIT=0cff2b52982be5b1163aa9a62fb01f03ce91e0d2
+ENV PYO3_PYTHON="/workspace/.pyenv/shims/python"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup toolchain install 1.96.0 --profile minimal \
+    && rustup default 1.96.0
+
+RUN git clone https://github.com/Equim-chan/Mortal.git /opt/mortal-source \
+    && git -C /opt/mortal-source checkout "${MORTAL_COMMIT}" \
+    && cargo build --manifest-path /opt/mortal-source/Cargo.toml \
+        -p libriichi --lib --release \
+    && mkdir -p /opt/mortal \
+    && cp /opt/mortal-source/mortal/*.py /opt/mortal/ \
+    && cp /opt/mortal-source/target/release/libriichi.so /opt/mortal/libriichi.so
+
+RUN /workspace/.pyenv/shims/pip install toml tqdm tensorboard
+
+ENV PYTHONPATH="/opt/mortal"

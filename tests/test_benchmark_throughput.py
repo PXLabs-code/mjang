@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from benchmark_throughput import (  # noqa: E402
     memory_mib,
     parse_docker_stats,
+    rank_context,
     run_concurrent_games,
     run_game,
 )
@@ -58,6 +59,37 @@ class BenchmarkThroughputTests(unittest.TestCase):
 
         self.assertEqual(len(results), 6)
         self.assertEqual({port for _, port in results}, {28090, 28094})
+
+    def test_rank_context_is_descriptive_without_seat_rotations(self) -> None:
+        context = rank_context(
+            [
+                {
+                    "seed": 42,
+                    "valid": True,
+                    "efficiency_rank": 1,
+                    "mortal_ranks": "2,3,4",
+                },
+                {
+                    "seed": 42,
+                    "valid": True,
+                    "efficiency_rank": 4,
+                    "mortal_ranks": "1,2,3",
+                },
+                {
+                    "seed": 43,
+                    "valid": False,
+                    "efficiency_rank": 1,
+                    "mortal_ranks": "2,3,4",
+                },
+            ]
+        )
+
+        self.assertEqual(context["efficiency"]["seed_groups"], 0)
+        self.assertEqual(context["efficiency"]["average_rank"], 2.5)
+        self.assertEqual(context["efficiency"]["ci_95"], [None, None])
+        self.assertEqual(context["efficiency"]["descriptive_games"], 2)
+        self.assertEqual(context["mortal"]["seed_groups"], 0)
+        self.assertEqual(context["mortal"]["average_rank"], 2.5)
 
     @patch("benchmark_throughput.subprocess.run")
     def test_records_simulation_errors_as_invalid_games(self, run_process) -> None:

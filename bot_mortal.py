@@ -17,6 +17,7 @@ def create_mortal_bot(player_id: int) -> Any:
     from libriichi.mjai import Bot
     from model import Brain, DQN
 
+    torch.set_num_threads(1)
     device = torch.device("cpu")
     state = torch.load(
         config["control"]["state_file"],

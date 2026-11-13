@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
 import threading
@@ -92,6 +93,37 @@ def parse_docker_stats(
         memory_mib_total += memory_mib(memory_value)
         active_containers += 1
     return cpu_percent / 100, memory_mib_total, active_containers
+
+
+def rank_context(results: list[dict[str, Any]]) -> dict[str, Any]:
+    game_ranks: dict[str, list[float]] = {
+        "efficiency": [],
+        "mortal": [],
+    }
+    for row in results:
+        if not row["valid"]:
+            continue
+        efficiency_rank = row["efficiency_rank"]
+        if isinstance(efficiency_rank, int):
+            game_ranks["efficiency"].append(float(efficiency_rank))
+        mortal_ranks = row["mortal_ranks"]
+        if isinstance(mortal_ranks, str) and mortal_ranks:
+            game_ranks["mortal"].append(
+                statistics.mean(float(rank) for rank in mortal_ranks.split(","))
+            )
+
+    context: dict[str, Any] = {}
+    for bot, ranks in game_ranks.items():
+        context[bot] = {
+            "average_rank": statistics.mean(ranks) if ranks else None,
+            "ci_95": [None, None],
+            "seed_groups": 0,
+            "descriptive_games": len(ranks),
+            "estimate_basis": (
+                "descriptive only; throughput runs do not rotate seats"
+            ),
+        }
+    return context
 
 
 def docker_container_ids() -> set[str]:
@@ -386,10 +418,20 @@ def main() -> None:
     peak_cpu_cores = max((sample[1] for sample in samples), default=0.0)
     peak_memory_mib = max((sample[2] for sample in samples), default=0.0)
     valid_games = sum(row["valid"] for row in game_results)
+    rank_metrics = rank_context(game_results)
+    attempted_seed_values = len({row["seed"] for row in game_results})
     summary = {
         "games": args.games,
         "valid_games": valid_games,
         "failed_games": args.games - valid_games,
+        "invalid_rate": (args.games - valid_games) / args.games,
+        "attempted_seed_values": attempted_seed_values,
+        "valid_seed_values": len(
+            {row["seed"] for row in game_results if row["valid"]}
+        ),
+        "attempted_rotation_groups": 0,
+        "valid_rotation_groups": 0,
+        "rank_context": rank_metrics,
         "concurrency": args.concurrency,
         "seed_start": [10000, args.seed],
         "wall_seconds": wall_seconds,
@@ -434,6 +476,25 @@ def main() -> None:
         f"{host_cpus} host CPUs; peak memory "
         f"{peak_memory_mib:.0f} MiB"
     )
+    print(
+        f"Complete rotation groups: {summary['valid_rotation_groups']}/"
+        f"{summary['attempted_rotation_groups']}; "
+        f"distinct seeds: {summary['valid_seed_values']}/"
+        f"{summary['attempted_seed_values']}; "
+        f"invalid rate: {summary['invalid_rate']:.1%}"
+    )
+    for bot, values in rank_metrics.items():
+        ci = values["ci_95"]
+        ci_text = (
+            "not estimable"
+            if ci[0] is None
+            else f"[{ci[0]:.2f}, {ci[1]:.2f}]"
+        )
+        print(
+            f"{bot} source-match average rank: {values['average_rank']} "
+            f"(95% rotation-group CI {ci_text}; "
+            f"{values['seed_groups']} groups; {values['estimate_basis']})"
+        )
     print(f"Per-game CSV: {games_csv.resolve()}")
     print(f"Summary: {(args.logs_dir / 'benchmark.json').resolve()}")
 

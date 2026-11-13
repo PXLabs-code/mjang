@@ -1,6 +1,9 @@
 """只按向听数和有效进张选择弃牌的 mjai 基线 bot。"""
 
 import json
+import os
+import sys
+import time
 from typing import Any
 
 from .core import HandAnalyzer, hand_counts, tile_index
@@ -32,7 +35,12 @@ class EfficiencyBot:
             drawn_tile = event.get("pai")
             if not isinstance(drawn_tile, str):
                 raise ValueError("tsumo event must include a tile in 'pai'")
+            profile_decisions = os.environ.get("MAJANG_PROFILE_DECISIONS") == "1"
+            started_ns = time.perf_counter_ns() if profile_decisions else 0
             discard = self._choose_discard()
+            if profile_decisions:
+                elapsed_ns = time.perf_counter_ns() - started_ns
+                print(f"ADVISOR_DECISION_NS={elapsed_ns}", file=sys.stderr, flush=True)
             return {
                 "type": "dahai",
                 "actor": self.player_id,

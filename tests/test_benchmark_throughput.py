@@ -1,6 +1,8 @@
 import json
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +15,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from benchmark_throughput import (  # noqa: E402
     memory_mib,
     parse_docker_stats,
+    run_concurrent_games,
     run_game,
 )
 
@@ -37,6 +40,24 @@ class BenchmarkThroughputTests(unittest.TestCase):
     def test_rejects_malformed_docker_memory(self) -> None:
         with self.assertRaises(ValueError):
             memory_mib("512unknown / 4GiB")
+
+    def test_concurrent_games_reuse_ports_only_after_release(self) -> None:
+        active_ports: set[int] = set()
+        lock = threading.Lock()
+
+        def fake_game(index: int, port: int) -> tuple[int, int]:
+            with lock:
+                self.assertNotIn(port, active_ports)
+                active_ports.add(port)
+            time.sleep(0.01 * (3 - index % 3))
+            with lock:
+                active_ports.remove(port)
+            return index, port
+
+        results = run_concurrent_games(6, 2, 28090, fake_game)
+
+        self.assertEqual(len(results), 6)
+        self.assertEqual({port for _, port in results}, {28090, 28094})
 
     @patch("benchmark_throughput.subprocess.run")
     def test_records_simulation_errors_as_invalid_games(self, run_process) -> None:

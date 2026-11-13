@@ -10,8 +10,9 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from report_mortal_latency import count_mortal_inferences
 from summarize_results import read_match
@@ -31,6 +32,32 @@ MEMORY_FACTORS = {
     "GB": 1024,
     "GiB": 1024,
 }
+GameResult = TypeVar("GameResult")
+
+
+def run_concurrent_games(
+    games: int,
+    concurrency: int,
+    port_base: int,
+    runner: Callable[[int, int], GameResult],
+) -> list[GameResult]:
+    available_ports: Queue[int] = Queue()
+    for slot in range(concurrency):
+        available_ports.put(port_base + 4 * slot)
+
+    def run_with_port(game_index: int) -> GameResult:
+        port = available_ports.get()
+        try:
+            return runner(game_index, port)
+        finally:
+            available_ports.put(port)
+
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [
+            executor.submit(run_with_port, game_index)
+            for game_index in range(1, games + 1)
+        ]
+        return [future.result() for future in futures]
 
 
 def memory_mib(value: str) -> float:
@@ -311,23 +338,23 @@ def main() -> None:
     )
     monitor.start()
     started = time.monotonic()
+
+    def execute_game(game_index: int, port: int) -> dict[str, Any]:
+        return run_game(
+            game_index,
+            args.seed + game_index - 1,
+            port,
+            args.logs_dir,
+            args.efficiency_submission.resolve(),
+            args.mortal_submission.resolve(),
+            args.docker_image,
+            args.timeout,
+        )
+
     try:
-        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
-            futures = [
-                executor.submit(
-                    run_game,
-                    index,
-                    args.seed + index - 1,
-                    args.port_base + 4 * ((index - 1) % args.concurrency),
-                    args.logs_dir,
-                    args.efficiency_submission.resolve(),
-                    args.mortal_submission.resolve(),
-                    args.docker_image,
-                    args.timeout,
-                )
-                for index in range(1, args.games + 1)
-            ]
-            game_results = [future.result() for future in futures]
+        game_results = run_concurrent_games(
+            args.games, args.concurrency, args.port_base, execute_game
+        )
     finally:
         wall_seconds = time.monotonic() - started
         stop_event.set()
